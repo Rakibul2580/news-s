@@ -215,54 +215,72 @@ app.delete("/api/news/:id", async (req, res) => {
 // For the home page, we can create a route that fetches a limited number of news items, possibly with some filtering options like category or tags. Here's an example of how you might implement this:
 
 // GET /api/home-news
+// ========== SIMPLE IN‑MEMORY CACHE (TTL 30 seconds) ==========
+const cache = new Map();
+function getCached(key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > 30000) {
+    // 30 sec TTL
+    cache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+function setCache(key, data) {
+  cache.set(key, { data, timestamp: Date.now() });
+}
+
+// ========== OPTIMISED HOME‑NEWS ROUTE (with caching) ==========
 app.get("/api/home-news", async (req, res) => {
   try {
-    const { category, limit = 10, skip = 0 } = req.query; // default limit 10 for home page
+    const { category, limit = 10, skip = 0 } = req.query;
+    const cacheKey = `home-news-${category || "all"}-${limit}-${skip}`;
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ success: true, count: cached.length, news: cached });
+    }
+
     const query = {};
     if (category) query.category = category;
 
-    const news = await db
-      .collection("news")
-      .find(query)
-      .sort({ date: -1 }) // newest first
+    // Only select needed fields for home page (reduce data size)
+    const projection = {
+      _id: 1,
+      titleEnglish: 1,
+      titleBangla: 1,
+      image: 1,
+      category: 1,
+      date: 1,
+      createdAt: 1,
+      contentEnglish: { $substr: ["$contentEnglish", 0, 200] }, // snippet
+    };
+
+    const news = await newsCollection
+      .find(query, { projection })
+      .sort({ date: -1, createdAt: -1 })
       .skip(parseInt(skip))
       .limit(parseInt(limit))
       .toArray();
 
-    res.json({
-      success: true,
-      count: news.length,
-      news,
-    });
+    setCache(cacheKey, news);
+    res.json({ success: true, count: news.length, news });
   } catch (error) {
-    console.error("Error fetching news:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching news",
-      error: error.message,
-    });
+    console.error("Error fetching home-news:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
+// ========== SINGLE NEWS DETAIL (no caching needed) ==========
 app.get("/api/news/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const newsItem = await db
-      .collection("news")
-      .findOne({ _id: new ObjectId(id) });
-
-    if (!newsItem) {
-      return res.status(404).json({ message: "News item not found" });
-    }
-
+    const newsItem = await newsCollection.findOne({ _id: new ObjectId(id) });
+    if (!newsItem)
+      return res.status(404).json({ success: false, message: "Not found" });
     res.json({ success: true, newsItem });
   } catch (error) {
-    console.error("Error fetching news item:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error fetching news item",
-      error: error.message,
-    });
+    res.status(500).json({ success: false, message: "Invalid ID" });
   }
 });
 
@@ -358,7 +376,7 @@ app.post("/api/advertise", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("Welcome to the News API");
+  res.send("Welcome to the News API!");
 });
 
 // Start Server
