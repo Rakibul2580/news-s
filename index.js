@@ -23,7 +23,8 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 // MongoDB Connection
-const uri = process.env.MONGO_URI;
+const uri =
+  "mongodb+srv://news:3qq9PoI7WVk0YhyC@cluster0.49jtlcd.mongodb.net/?appName=Cluster0";
 const client = new MongoClient(uri);
 
 let db;
@@ -362,5 +363,5 @@ app.get("/", (req, res) => {
 });
 
 // Start Server
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
