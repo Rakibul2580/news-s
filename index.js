@@ -2,69 +2,75 @@ const express = require("express");
 const { MongoClient, ObjectId } = require("mongodb");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+const compression = require("compression");
 
 dotenv.config();
 
 const app = express();
 
-// Middleware
+// =======================
+// MIDDLEWARE
+// =======================
+
 app.use(cors());
-app.use(express.json());
-app.use("/uploads", express.static("uploads"));
 
-// Ensure uploads folder exists
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-  console.log("Uploads folder created successfully");
-}
+app.use(express.json({ limit: "10mb" }));
 
-// MongoDB Connection
+app.use(compression());
+
+// Cache
+app.use((req, res, next) => {
+  res.setHeader("Cache-Control", "public, max-age=300");
+  next();
+});
+
+// =======================
+// MONGODB CONNECTION
+// =======================
+
 const uri = process.env.MONGO_URI;
-const client = new MongoClient(uri);
+
+const client = new MongoClient(uri, {
+  maxPoolSize: 20,
+});
 
 let db;
 
-async function connectToMongoDB() {
+async function connectDB() {
   try {
     await client.connect();
-    db = client.db("newsDB"); // Database name
-    console.log("MongoDB connected successfully");
+
+    db = client.db("newsDB");
+
+    // INDEXES
+    await db.collection("news").createIndex({ createdAt: -1 });
+
+    await db.collection("news").createIndex({ category: 1 });
+
+    await db.collection("news").createIndex({
+      titleBangla: "text",
+      titleEnglish: "text",
+    });
+
+    console.log("MongoDB Connected Successfully");
   } catch (error) {
-    console.log("MongoDB connection error:", error);
+    console.log("MongoDB Error:", error);
   }
 }
 
-connectToMongoDB();
+connectDB();
 
-// Multer setup for image upload with file extension handling
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + path.extname(file.originalname);
-    cb(null, uniqueName);
-  },
+// =======================
+// ROOT ROUTE
+// =======================
+
+app.get("/", (req, res) => {
+  res.send("News API Running Successfully");
 });
 
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif"];
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error("Only image files (jpeg, jpg, png, gif) are allowed"), false);
-  }
-};
-
-const upload = multer({
-  storage: storage,
-  fileFilter: fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
+// =======================
+// POST NEWS
+// =======================
 
 app.post("/api/news", async (req, res) => {
   try {
@@ -75,41 +81,52 @@ app.post("/api/news", async (req, res) => {
       tags,
       contentBangla,
       contentEnglish,
-      image, // Expecting image URL as a string
+      image,
       author,
       publishDate,
     } = req.body;
-    console.log(req.body);
 
     const news = {
-      titleBangla,
-      titleEnglish,
-      category,
+      titleBangla: titleBangla || "",
+      titleEnglish: titleEnglish || "",
+      category: category || "",
       tags: tags ? tags.split(",").map((tag) => tag.trim()) : [],
-      contentBangla,
-      contentEnglish,
-      image, // Store image URL directly
-      author,
-      publishDate,
+      contentBangla: contentBangla || "",
+      contentEnglish: contentEnglish || "",
+      image: image || "",
+      author: author || "",
+      publishDate: publishDate || "",
       createdAt: new Date(),
     };
 
     const result = await db.collection("news").insertOne(news);
+
     res.status(201).json({
-      message: "News posted successfully",
-      news: { _id: result.insertedId, ...news },
+      success: true,
+      message: "News Created Successfully",
+      news: {
+        _id: result.insertedId,
+        ...news,
+      },
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error posting news", error: error.message });
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed To Create News",
+    });
   }
 });
 
-// Update News
+// =======================
+// UPDATE NEWS
+// =======================
+
 app.put("/api/news/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const {
       titleBangla,
       titleEnglish,
@@ -117,7 +134,7 @@ app.put("/api/news/:id", async (req, res) => {
       tags,
       contentBangla,
       contentEnglish,
-      image, // Expecting image URL as a string
+      image,
       author,
       publishDate,
     } = req.body;
@@ -129,42 +146,91 @@ app.put("/api/news/:id", async (req, res) => {
       tags: tags ? tags.split(",").map((tag) => tag.trim()) : [],
       contentBangla,
       contentEnglish,
-      image, // Store image URL directly
+      image,
       author,
       publishDate,
+      updatedAt: new Date(),
     };
 
-    const result = await db
-      .collection("news")
-      .updateOne({ _id: new ObjectId(id) }, { $set: updatedNews });
+    const result = await db.collection("news").updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: updatedNews,
+      },
+    );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({ message: "News not found" });
+      return res.status(404).json({
+        success: false,
+        message: "News Not Found",
+      });
     }
 
-    res.json({ message: "News updated successfully", news: updatedNews });
+    res.json({
+      success: true,
+      message: "News Updated Successfully",
+    });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error updating news", error: error.message });
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed To Update News",
+    });
   }
 });
 
-// Get All News with Pagination, Search, and Category Filter
+// =======================
+// DELETE NEWS
+// =======================
+
+app.delete("/api/news/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.collection("news").deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "News Not Found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "News Deleted Successfully",
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed To Delete News",
+    });
+  }
+});
+
+// =======================
+// GET ALL NEWS
+// =======================
+
 app.get("/api/news", async (req, res) => {
   try {
     const { page = 1, limit = 10, search = "", category = "" } = req.query;
+
     const query = {};
 
-    // Search filter
+    // SEARCH
     if (search) {
-      query.$or = [
-        { titleBangla: { $regex: search, $options: "i" } },
-        { titleEnglish: { $regex: search, $options: "i" } },
-      ];
+      query.$text = {
+        $search: search,
+      };
     }
 
-    // Category filter
+    // CATEGORY
     if (category) {
       query.category = category;
     }
@@ -172,101 +238,184 @@ app.get("/api/news", async (req, res) => {
     const news = await db
       .collection("news")
       .find(query)
+      .project({
+        contentBangla: 0,
+        contentEnglish: 0,
+      })
       .sort({ createdAt: -1 })
-      .skip((page - 1) * parseInt(limit))
-      .limit(parseInt(limit))
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
       .toArray();
 
     const total = await db.collection("news").countDocuments(query);
 
     res.json({
+      success: true,
       news,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / Number(limit)),
       currentPage: Number(page),
+      totalNews: total,
     });
   } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error fetching news", error: error.message });
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed To Fetch News",
+    });
   }
 });
 
-// Delete News
-app.delete("/api/news/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
+// =======================
+// HOME PAGE API
+// FAST SINGLE API
+// =======================
 
-    const result = await db
-      .collection("news")
-      .deleteOne({ _id: new ObjectId(id) });
-
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ message: "News not found" });
-    }
-
-    res.json({ message: "News deleted successfully" });
-  } catch (error) {
-    res
-      .status(500)
-      .json({ message: "Error deleting news", error: error.message });
-  }
-});
-
-// For the home page, we can create a route that fetches a limited number of news items, possibly with some filtering options like category or tags. Here's an example of how you might implement this:
-
-// GET /api/home-news
 app.get("/api/home-news", async (req, res) => {
   try {
-    const { category, limit = 10, skip = 0 } = req.query; // default limit 10 for home page
-    const query = {};
-    if (category) query.category = category;
+    const collection = db.collection("news");
+
+    const [hero, politics, sports, entertainment, technology] =
+      await Promise.all([
+        collection
+          .find({})
+          .project({
+            contentBangla: 0,
+            contentEnglish: 0,
+          })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray(),
+
+        collection
+          .find({ category: "politics" })
+          .project({
+            contentBangla: 0,
+            contentEnglish: 0,
+          })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray(),
+
+        collection
+          .find({ category: "sports" })
+          .project({
+            contentBangla: 0,
+            contentEnglish: 0,
+          })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray(),
+
+        collection
+          .find({ category: "entertainment" })
+          .project({
+            contentBangla: 0,
+            contentEnglish: 0,
+          })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray(),
+
+        collection
+          .find({ category: "technology" })
+          .project({
+            contentBangla: 0,
+            contentEnglish: 0,
+          })
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .toArray(),
+      ]);
+
+    res.json({
+      success: true,
+      hero,
+      politics,
+      sports,
+      entertainment,
+      technology,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed To Fetch Home News",
+    });
+  }
+});
+
+// =======================
+// CATEGORY NEWS
+// =======================
+
+app.get("/api/category-news/:category", async (req, res) => {
+  try {
+    const { category } = req.params;
 
     const news = await db
       .collection("news")
-      .find(query)
-      .sort({ date: -1 }) // newest first
-      .skip(parseInt(skip))
-      .limit(parseInt(limit))
+      .find({ category })
+      .project({
+        contentBangla: 0,
+        contentEnglish: 0,
+      })
+      .sort({ createdAt: -1 })
+      .limit(20)
       .toArray();
 
     res.json({
       success: true,
-      count: news.length,
       news,
     });
   } catch (error) {
-    console.error("Error fetching news:", error);
+    console.log(error);
+
     res.status(500).json({
       success: false,
-      message: "Error fetching news",
-      error: error.message,
+      message: "Failed To Fetch Category News",
     });
   }
 });
+
+// =======================
+// NEWS DETAILS
+// =======================
 
 app.get("/api/news/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const newsItem = await db
-      .collection("news")
-      .findOne({ _id: new ObjectId(id) });
 
-    if (!newsItem) {
-      return res.status(404).json({ message: "News item not found" });
+    const news = await db.collection("news").findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!news) {
+      return res.status(404).json({
+        success: false,
+        message: "News Not Found",
+      });
     }
 
-    res.json({ success: true, newsItem });
+    res.json({
+      success: true,
+      newsItem: news,
+    });
   } catch (error) {
-    console.error("Error fetching news item:", error);
+    console.log(error);
+
     res.status(500).json({
       success: false,
-      message: "Error fetching news item",
-      error: error.message,
+      message: "Failed To Fetch News Details",
     });
   }
 });
 
-// POST /api/contact
+// =======================
+// CONTACT API
+// =======================
+
 app.post("/api/contact", async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
@@ -274,93 +423,85 @@ app.post("/api/contact", async (req, res) => {
     if (!name || !email || !message) {
       return res.status(400).json({
         success: false,
-        message: "Name, email and message are required.",
-      });
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
+        message: "All Fields Are Required",
       });
     }
 
     const contact = {
-      name: name.trim(),
-      email: email.trim(),
-      subject: subject?.trim() || "No subject",
-      message: message.trim(),
+      name,
+      email,
+      subject,
+      message,
       createdAt: new Date(),
     };
 
     const result = await db.collection("contacts").insertOne(contact);
+
     res.status(201).json({
       success: true,
-      message: "Your message has been sent successfully!",
+      message: "Message Sent Successfully",
       id: result.insertedId,
     });
   } catch (error) {
-    console.error("Contact save error:", error);
+    console.log(error);
+
     res.status(500).json({
       success: false,
-      message: "Server error. Please try again later.",
+      message: "Failed To Send Message",
     });
   }
 });
 
-// POST /api/advertise
+// =======================
+// ADVERTISE API
+// =======================
+
 app.post("/api/advertise", async (req, res) => {
   try {
     const { name, email, company, website, budget, message } = req.body;
 
-    // Validation
     if (!name || !email || !company) {
       return res.status(400).json({
         success: false,
-        message: "Name, email, and company are required.",
-      });
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid email address.",
+        message: "Required Fields Missing",
       });
     }
 
     const inquiry = {
-      name: name.trim(),
-      email: email.trim(),
-      company: company.trim(),
-      website: website?.trim() || "",
-      budget: budget || "Not specified",
-      message: message?.trim() || "",
+      name,
+      email,
+      company,
+      website,
+      budget,
+      message,
       createdAt: new Date(),
-      status: "pending", // for internal tracking
     };
 
     const result = await db
       .collection("advertise_inquiries")
       .insertOne(inquiry);
+
     res.status(201).json({
       success: true,
-      message: "Thank you! We'll be in touch shortly.",
+      message: "Advertise Request Submitted",
       id: result.insertedId,
     });
   } catch (error) {
-    console.error("Advertise submission error:", error);
+    console.log(error);
+
     res.status(500).json({
       success: false,
-      message: "Server error. Please try again later.",
+      message: "Failed To Submit Advertise Request",
     });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Welcome to the News API");
-});
+// =======================
+// SERVER
+// =======================
 
-// Start Server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server Running On Port ${PORT}`);
+});
