@@ -40,21 +40,16 @@ async function connectDB() {
   try {
     await client.connect();
 
+    console.log("MongoDB Connected");
+
     db = client.db("newsDB");
 
-    // INDEXES
-    await db.collection("news").createIndex({ createdAt: -1 });
+    // TEST QUERY
+    const test = await db.collection("news").findOne();
 
-    await db.collection("news").createIndex({ category: 1 });
-
-    await db.collection("news").createIndex({
-      titleBangla: "text",
-      titleEnglish: "text",
-    });
-
-    console.log("MongoDB Connected Successfully");
+    console.log("Test News:", test);
   } catch (error) {
-    console.log("MongoDB Error:", error);
+    console.log("MongoDB Connection Error:", error);
   }
 }
 
@@ -66,6 +61,24 @@ connectDB();
 
 app.get("/", (req, res) => {
   res.send("News API Running Successfully");
+});
+
+app.get("/api/test", async (req, res) => {
+  try {
+    const news = await db.collection("news").find({}).limit(1).toArray();
+
+    res.json({
+      success: true,
+      news,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 // =======================
