@@ -316,21 +316,17 @@ app.post("/api/advertise", async (req, res) => {
 
     // Validation
     if (!name || !email || !company) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Name, email, and company are required.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Name, email, and company are required.",
+      });
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Please provide a valid email address.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address.",
+      });
     }
 
     const inquiry = {
@@ -347,22 +343,22 @@ app.post("/api/advertise", async (req, res) => {
     const result = await db
       .collection("advertise_inquiries")
       .insertOne(inquiry);
-    res
-      .status(201)
-      .json({
-        success: true,
-        message: "Thank you! We'll be in touch shortly.",
-        id: result.insertedId,
-      });
+    res.status(201).json({
+      success: true,
+      message: "Thank you! We'll be in touch shortly.",
+      id: result.insertedId,
+    });
   } catch (error) {
     console.error("Advertise submission error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Server error. Please try again later.",
-      });
+    res.status(500).json({
+      success: false,
+      message: "Server error. Please try again later.",
+    });
   }
+});
+
+app.get("/", (req, res) => {
+  res.send("Welcome to the News API");
 });
 
 // Start Server
