@@ -61,7 +61,7 @@ connectDB();
 // =======================
 
 app.get("/", (req, res) => {
-  res.send("News API Running Successfully");
+  res.send("News API Running Successfully!");
 });
 
 app.get("/api/test", async (req, res) => {
