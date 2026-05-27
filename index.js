@@ -30,9 +30,7 @@ app.use((req, res, next) => {
 
 const uri = process.env.MONGO_URI;
 
-const client = new MongoClient(uri, {
-  maxPoolSize: 20,
-});
+const client = new MongoClient(uri);
 
 let db;
 
@@ -40,19 +38,22 @@ async function connectDB() {
   try {
     await client.connect();
 
-    console.log("MongoDB Connected");
+    console.log("MongoDB Connected Successfully");
 
     db = client.db("newsDB");
 
-    // TEST QUERY
-    const test = await db.collection("news").findOne();
+    // Create indexes
+    await db.collection("news").createIndex({ createdAt: -1 });
 
-    console.log("Test News:", test);
+    await db.collection("news").createIndex({ category: 1 });
+
+    console.log("Indexes Created");
   } catch (error) {
-    console.log("MongoDB Connection Error:", error);
+    console.log("MongoDB Error:", error);
   }
 }
 
+// CONNECT DATABASE FIRST
 connectDB();
 
 // =======================
