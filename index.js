@@ -594,11 +594,20 @@ async function startServer() {
     // HOME NEWS
     app.get("/api/home-news", async (req, res) => {
       try {
+        const { category, limit = 10 } = req.query;
+
+        const query = {};
+
+        // CATEGORY FILTER
+        if (category) {
+          query.category = category;
+        }
+
         const news = await db
           .collection("news")
-          .find({})
+          .find(query)
           .sort({ createdAt: -1 })
-          .limit(10)
+          .limit(Number(limit))
           .toArray();
 
         res.json({
